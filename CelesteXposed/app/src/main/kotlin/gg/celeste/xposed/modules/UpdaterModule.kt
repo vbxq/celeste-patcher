@@ -52,8 +52,8 @@ object UpdaterModule : Module() {
     private const val ETAG_FILE = "etag.txt"
     private const val CONFIG_FILE = "loader.json"
 
-    private const val DEFAULT_BASE_URL = "https://codeberg.org/cocobo1/Kettu/raw/branch/dist/"
-    private const val DEFAULT_BUNDLE_NAME = "kettu.min.js"
+    private const val DEFAULT_BASE_URL = "https://github.com/vbxq/celeste-patcher/releases/latest/download/"
+    private const val DEFAULT_BUNDLE_NAME = "celeste.js"
 
     override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) = with(packageParam) {
         cacheDir = File(appInfo.dataDir, Constants.CACHE_DIR).apply { mkdirs() }

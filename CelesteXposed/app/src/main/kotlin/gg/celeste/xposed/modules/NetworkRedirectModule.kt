@@ -19,6 +19,7 @@ object NetworkRedirectModule : Module() {
         "media.discordapp.net" to "media.celeste.gg",
         "discordapp.com" to "alpha.celeste.gg",
         "status.discord.com" to "alpha.celeste.gg",
+        "discord.gg" to "alpha.celeste.gg",
     )
 
     private fun rewriteUrl(url: String): String {
@@ -132,5 +133,54 @@ object NetworkRedirectModule : Module() {
                 }
             } catch (_: Exception) {}
         }
+
+        hookClipboard()
+        hookShareIntent()
     } }
+
+    private fun hookClipboard() {
+        try {
+            val clipDataClass = android.content.ClipData::class.java
+            val newPlainTextMethod = clipDataClass.getDeclaredMethod(
+                "newPlainText", CharSequence::class.java, CharSequence::class.java
+            )
+            XposedBridge.hookMethod(newPlainTextMethod, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val text = param.args[1]?.toString() ?: return
+                    val rewritten = rewriteUrl(text)
+                    if (rewritten != text) {
+                        param.args[1] = rewritten
+                        Log.i("Clipboard: $text -> $rewritten")
+                    }
+                }
+            })
+            Log.i("Hooked ClipData.newPlainText()")
+        } catch (e: Exception) {
+            Log.e("Failed to hook clipboard: ${e.message}")
+        }
+    }
+
+    private fun hookShareIntent() {
+        try {
+            val intentClass = android.content.Intent::class.java
+            val putExtraMethod = intentClass.getDeclaredMethod(
+                "putExtra", String::class.java, String::class.java
+            )
+            XposedBridge.hookMethod(putExtraMethod, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val key = param.args[0] as? String ?: return
+                    if (key != android.content.Intent.EXTRA_TEXT) return
+                    val text = param.args[1] as? String ?: return
+                    val rewritten = rewriteUrl(text)
+                    if (rewritten != text) {
+                        param.args[1] = rewritten
+                        Log.i("Share intent: $text -> $rewritten")
+                    }
+                }
+            })
+            Log.i("Hooked Intent.putExtra() for share")
+        } catch (e: Exception) {
+            Log.e("Failed to hook share intent: ${e.message}")
+        }
+    }
 }
