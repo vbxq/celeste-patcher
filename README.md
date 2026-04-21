@@ -123,6 +123,8 @@ grep -n "public.*(" decompiled/sources/okhttp3/OkHttpClient.java | head -20
 
 Update the method names in `NetworkRedirectModule.kt`, rebuild, and redeploy.
 
+TOOD: Path hermes bytecode discord.gg => celeste.gg
+
 ## Credits
 
 Fork of [KettuManager](https://github.com/C0C0B01/KettuManager) and [KettuXposed](https://codeberg.org/cocobo1/KettuXposed) by cocobo1.
