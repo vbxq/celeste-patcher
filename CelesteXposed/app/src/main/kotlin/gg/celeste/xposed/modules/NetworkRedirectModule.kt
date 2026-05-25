@@ -39,6 +39,9 @@ object NetworkRedirectModule : Module() {
             XposedBridge.hookMethod(urlStringMethod, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val original = param.args[0] as? String ?: return
+                    if (original.contains("s3.") || original.contains("backblaze") || original.contains("upload") || original.contains("attach")) {
+                        Log.i("DEBUG_URL: $original")
+                    }
                     val rewritten = rewriteUrl(original)
                     if (rewritten != original) {
                         param.args[0] = rewritten
@@ -59,6 +62,9 @@ object NetworkRedirectModule : Module() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val httpUrl = param.args[0] ?: return
                     val original = httpUrl.toString()
+                    if (original.contains("s3.") || original.contains("backblaze") || original.contains("upload") || original.contains("attach")) {
+                        Log.i("DEBUG_URL_T: $original")
+                    }
                     val rewritten = rewriteUrl(original)
                     if (rewritten != original) {
                         try {
@@ -94,49 +100,37 @@ object NetworkRedirectModule : Module() {
             Log.e("Failed to hook HttpUrl.Builder.l: ${e.message}")
         }
 
-        try {
-            val clientBuilderClass = classLoader.loadClass("okhttp3.OkHttpClient\$Builder")
-            val buildMethod = clientBuilderClass.getDeclaredMethod("c")
-            XposedBridge.hookMethod(buildMethod, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    try {
-                        val builder = param.thisObject
-
-                        val trustManager = object : javax.net.ssl.X509TrustManager {
-                            override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                            override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                            override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
-                        }
-
-                        val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
-                        sslContext.init(null, arrayOf<javax.net.ssl.TrustManager>(trustManager), null)
-
-                        val hvMethod = clientBuilderClass.getDeclaredMethod("j", javax.net.ssl.HostnameVerifier::class.java)
-                        hvMethod.invoke(builder, javax.net.ssl.HostnameVerifier { _, _ -> true })
-
-                        val ssfMethod = clientBuilderClass.getDeclaredMethod("U",
-                            javax.net.ssl.SSLSocketFactory::class.java,
-                            javax.net.ssl.X509TrustManager::class.java
-                        )
-                        ssfMethod.invoke(builder, sslContext.socketFactory, trustManager)
-                    } catch (_: Exception) {}
-                }
-            })
-            Log.i("Hooked OkHttpClient.Builder.c()")
-        } catch (e: Exception) {
-            Log.e("Failed to hook OkHttpClient.Builder.c: ${e.message}")
-            try {
-                val cls = classLoader.loadClass("okhttp3.OkHttpClient\$Builder")
-                val methods = cls.declaredMethods.filter { it.parameterTypes.isEmpty() && it.returnType.name.contains("OkHttpClient") }
-                for (m in methods) {
-                    Log.i("OkHttpClient.Builder candidate build method: ${m.name}()")
-                }
-            } catch (_: Exception) {}
-        }
-
+        hookNetworkingModule(classLoader)
         hookClipboard()
         hookShareIntent()
     } }
+
+    private fun hookNetworkingModule(classLoader: ClassLoader) {
+        try {
+            val networkingModule = classLoader.loadClass("com.facebook.react.modules.network.NetworkingModule")
+            for (method in networkingModule.declaredMethods) {
+                if (method.name == "sendRequest" || method.name == "sendRequestInternal") {
+                    val paramTypes = method.parameterTypes
+                    val urlParamIndex = paramTypes.indexOfFirst { it == String::class.java }
+                    if (urlParamIndex >= 0) {
+                        XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val url = param.args[urlParamIndex] as? String ?: return
+                                val rewritten = rewriteUrl(url)
+                                if (rewritten != url) {
+                                    param.args[urlParamIndex] = rewritten
+                                    Log.i("RN Redirect: $url -> $rewritten")
+                                }
+                            }
+                        })
+                        Log.i("Hooked NetworkingModule.${method.name}()")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("Failed to hook NetworkingModule: ${e.message}")
+        }
+    }
 
     private fun hookClipboard() {
         try {
