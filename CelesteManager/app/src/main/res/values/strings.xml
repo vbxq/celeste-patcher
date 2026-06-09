@@ -36,6 +36,8 @@
 
     <string name="step_change_icon">Changing app icon</string>
     <string name="step_patch_manifests">Patching app manifests</string>
+    <string name="step_rebrand">Rebranding to Celeste</string>
+    <string name="step_patch_invites">Patching invite links</string>
     <string name="step_add_vd">Injecting Celeste</string>
 
     <string name="step_signing">Signing APKs</string>

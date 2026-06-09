@@ -16,8 +16,10 @@ import gg.celeste.manager.installer.step.download.DownloadResourcesStep
 import gg.celeste.manager.installer.step.download.DownloadCelesteStep
 import gg.celeste.manager.installer.step.installing.InstallStep
 import gg.celeste.manager.installer.step.patching.AddCelesteStep
+import gg.celeste.manager.installer.step.patching.PatchInviteLinksStep
 import gg.celeste.manager.installer.step.patching.PatchManifestsStep
 import gg.celeste.manager.installer.step.patching.PresignApksStep
+import gg.celeste.manager.installer.step.patching.RebrandStringsStep
 import gg.celeste.manager.installer.step.patching.ReplaceIconStep
 import gg.celeste.manager.installer.util.LogEntry
 import gg.celeste.manager.installer.util.Logger
@@ -125,6 +127,8 @@ class StepRunner(
         // Patching
         if (preferenceManager.patchIcon) add(ReplaceIconStep())
         add(PatchManifestsStep())
+        add(RebrandStringsStep())
+        add(PatchInviteLinksStep())
         add(PresignApksStep(signedDir))
         add(AddCelesteStep(signedDir, lspatchedDir))
 
