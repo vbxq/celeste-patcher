@@ -1,14 +1,12 @@
 # Celeste Patcher
 
-Patches the Discord Android app to connect to a [Celeste](https://celeste.gg) instance instead of Discord servers.
-
-No root required, no manual configuration, one-tap install !
+Patches the Discord Android app to connect to a [Celeste](https://celeste.gg) instead of Discord servers
 
 ## How it works
 
-**CelesteManager** downloads the official Discord APK, embeds the **CelesteXposed** module via [LSPatch](https://github.com/LSPosed/LSPatch), and installs the patched app.
+CelesteManager downloads the official Discord APK, embeds the CelesteXposed module via [LSPatch](https://github.com/LSPosed/LSPatch), and installs the patched app
 
-At runtime, CelesteXposed hooks Discord's OkHttp networking layer (R8-obfuscated methods found via DEX analysis with jadx) and rewrites every outgoing URL:
+At runtime, CelesteXposed hooks `okhttp3.HttpUrl`
 
 | Original | Redirected to |
 |----------|---------------|
@@ -16,6 +14,8 @@ At runtime, CelesteXposed hooks Discord's OkHttp networking layer (R8-obfuscated
 | `gateway.discord.gg` | `alpha-gateway.celeste.gg` |
 | `cdn.discordapp.com` | `cdn.celeste.gg` |
 | `media.discordapp.net` | `media.celeste.gg` |
+| `latency.discord.gg` | `latency.celeste.gg` |
+
 
 ## Install (prebuilt)
 
@@ -90,7 +90,7 @@ CelesteManager/     Android app — downloads Discord, injects CelesteXposed via
 CelesteXposed/      Xposed module — hooks OkHttp to redirect all Discord traffic to Celeste
 ```
 
-The key file is [`NetworkRedirectModule.kt`](CelesteXposed/app/src/main/kotlin/gg/celeste/xposed/modules/NetworkRedirectModule.kt). It contains the OkHttp hooks and the host mapping table.
+The key file is [`NetworkRedirectModule.kt`](CelesteXposed/app/src/main/kotlin/gg/celeste/xposed/modules/NetworkRedirectModule.kt). It contains the `HttpUrl` constructor hook and the host mapping table.
 
 ## Changing the target instance
 
@@ -109,21 +109,19 @@ Rebuild CelesteXposed and redeploy.
 
 ## When Discord updates
 
-Discord obfuscates OkHttp method names with R8. A new Discord version may rename them and break the hooks.
 
-To find the new names, decompile the Discord APK and look at the OkHttp classes:
+this should keep working across Discord updates with no changes, to confirm a build still redirects, watch logcat:
 
 ```bash
-jadx --no-res discord.apk -d decompiled/
-grep -n "discord\.com" decompiled/sources/com/discord/bundle_updater/BundleUpdater.java
-grep -n "public.*(" decompiled/sources/okhttp3/Request.java | head -20
-grep -n "public.*(" decompiled/sources/okhttp3/HttpUrl.java | head -20
-grep -n "public.*(" decompiled/sources/okhttp3/OkHttpClient.java | head -20
+adb logcat -s Celeste
 ```
 
-Update the method names in `NetworkRedirectModule.kt`, rebuild, and redeploy.
+or just try logging in to your celeste account
 
-TOOD: Path hermes bytecode discord.gg => celeste.gg
+
+## TODOs ? 
+
+patch the hermes bytecode to rewrite `discord.gg` -> `celeste.gg` in bundled invite links, actual Discord => Celeste
 
 ## Credits
 

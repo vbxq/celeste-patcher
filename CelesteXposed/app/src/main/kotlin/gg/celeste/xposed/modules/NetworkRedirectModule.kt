@@ -10,6 +10,7 @@ object NetworkRedirectModule : Module() {
 
     private val HOST_MAP = mapOf(
         "discord.com" to "alpha.celeste.gg",
+        "latency.discord.gg" to "latency.celeste.gg",
         "ptb.discord.com" to "alpha.celeste.gg",
         "canary.discord.com" to "alpha.celeste.gg",
         "www.discord.com" to "alpha.celeste.gg",
@@ -33,77 +34,59 @@ object NetworkRedirectModule : Module() {
     }
 
     override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) { with(packageParam) {
-        try {
-            val builderClass = classLoader.loadClass("okhttp3.Request\$Builder")
-            val urlStringMethod = builderClass.getDeclaredMethod("s", String::class.java)
-            XposedBridge.hookMethod(urlStringMethod, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val original = param.args[0] as? String ?: return
-                    if (original.contains("s3.") || original.contains("backblaze") || original.contains("upload") || original.contains("attach")) {
-                        Log.i("DEBUG_URL: $original")
-                    }
-                    val rewritten = rewriteUrl(original)
-                    if (rewritten != original) {
-                        param.args[0] = rewritten
-                        Log.i("Redirect: $original -> $rewritten")
-                    }
-                }
-            })
-            Log.i("Hooked Request.Builder.s(String)")
-        } catch (e: Exception) {
-            Log.e("Failed to hook Request.Builder.s: ${e.message}")
-        }
-
-        try {
-            val builderClass = classLoader.loadClass("okhttp3.Request\$Builder")
-            val httpUrlClass = classLoader.loadClass("okhttp3.HttpUrl")
-            val urlHttpUrlMethod = builderClass.getDeclaredMethod("t", httpUrlClass)
-            XposedBridge.hookMethod(urlHttpUrlMethod, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val httpUrl = param.args[0] ?: return
-                    val original = httpUrl.toString()
-                    if (original.contains("s3.") || original.contains("backblaze") || original.contains("upload") || original.contains("attach")) {
-                        Log.i("DEBUG_URL_T: $original")
-                    }
-                    val rewritten = rewriteUrl(original)
-                    if (rewritten != original) {
-                        try {
-                            val stringMethod = param.thisObject::class.java.getDeclaredMethod("s", String::class.java)
-                            stringMethod.invoke(param.thisObject, rewritten)
-                            param.result = param.thisObject
-                        } catch (e: Exception) {
-                            Log.e("HttpUrl redirect fallback failed: ${e.message}")
-                        }
-                    }
-                }
-            })
-            Log.i("Hooked Request.Builder.t(HttpUrl)")
-        } catch (e: Exception) {
-            Log.e("Failed to hook Request.Builder.t: ${e.message}")
-        }
-
-        try {
-            val httpUrlBuilderClass = classLoader.loadClass("okhttp3.HttpUrl\$a")
-            val hostMethod = httpUrlBuilderClass.getDeclaredMethod("l", String::class.java)
-            XposedBridge.hookMethod(hostMethod, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val original = param.args[0] as? String ?: return
-                    val replacement = HOST_MAP[original.lowercase()]
-                    if (replacement != null) {
-                        param.args[0] = replacement
-                        Log.i("HttpUrl.Builder host: $original -> $replacement")
-                    }
-                }
-            })
-            Log.i("Hooked HttpUrl.Builder.l(String)")
-        } catch (e: Exception) {
-            Log.e("Failed to hook HttpUrl.Builder.l: ${e.message}")
-        }
-
+        // method names on Request.Builder (url(String) / url(HttpUrl)) and the whole  HttpUrl.Builder class get renamed on almost every build
+        // so hooking them by their obfuscated names (s/t/l,okhttp3.HttpUrl$a, ...) is wacky and breaks
+        // that's what broke between 331.x and 332.x:
+        // Request.Builder.url(String)  : `s`  ->  `i`
+        // Request.Builder.url(HttpUrl) : `t`  ->  removed (inlined to a field write)
+        // HttpUrl.Builder              : okhttp3.HttpUrl$a -> hs.s, host() `l` -> `e`
+        // class name `okhttp3.HttpUrl` and this constructor's shape are kept stable across versions (bc public OkHttp API surface)
+        // so this survives R8 renames
+        hookHttpUrlConstructor(classLoader)
+        
         hookNetworkingModule(classLoader)
         hookClipboard()
         hookShareIntent()
     } }
+
+    private fun hookHttpUrlConstructor(classLoader: ClassLoader) {
+        try {
+            val httpUrlClass = classLoader.loadClass("okhttp3.HttpUrl")
+            // okhttp3.HttpUrl has exactly one constructor (9 args)
+            // locate it by arity + the int port at index 4 instead of an exact parameter type list
+            // this way we don't depend on List-vs-ArrayList descriptor details that differ between decompilers/R8 builds
+            val ctor = httpUrlClass.declaredConstructors.firstOrNull { c ->
+                val p = c.parameterTypes
+                p.size == 9 &&
+                    p[3] == String::class.java &&
+                    p[4] == Integer.TYPE &&
+                    p[8] == String::class.java
+            } ?: throw NoSuchMethodException("okhttp3.HttpUrl 9-arg constructor not found")
+
+            XposedBridge.hookMethod(ctor, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val url = param.args[8] as? String ?: return
+                    if (!url.contains("discord")) return
+
+                    val newUrl = rewriteUrl(url)
+                    if (newUrl == url) return
+                    param.args[8] = newUrl
+
+                    // keep the standalone host field consistent with the new url
+                    val host = param.args[3] as? String
+                    if (host != null) {
+                        val newHost = HOST_MAP[host.lowercase()] ?: rewriteUrl(host)
+                        if (newHost != host) param.args[3] = newHost
+                    }
+
+                    Log.i("Redirect: $url -> $newUrl")
+                }
+            })
+            Log.i("Hooked okhttp3.HttpUrl.<init> (host+url redirect)")
+        } catch (e: Throwable) {
+            Log.e("Failed to hook okhttp3.HttpUrl.<init>: ${e.message}")
+        }
+    }
 
     private fun hookNetworkingModule(classLoader: ClassLoader) {
         try {
