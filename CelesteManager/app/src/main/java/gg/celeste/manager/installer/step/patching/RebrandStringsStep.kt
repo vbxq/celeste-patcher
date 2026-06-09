@@ -46,7 +46,7 @@ class RebrandStringsStep : Step() {
 
         val targets = ZipReader(baseApk).use { zip ->
             zip.entryNames.filter {
-                it.startsWith("res/raw/cache_intl") && it.endsWith("compiledmessages.jsona")
+                it.startsWith("res/raw/") && it.endsWith("compiledmessages.jsona")
             }
         }
         runner.logger.i("Scanning ${targets.size} i18n message files for rebranding")
