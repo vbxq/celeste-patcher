@@ -87,21 +87,26 @@ object NetworkRedirectModule : Module() {
 
             XposedBridge.hookMethod(ctor, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    val url = param.args[8] as? String ?: return
-                    if (!url.contains("discord")) return
+                    try {
+                        if (Thread.currentThread().name.contains("OkHttp")) return
+                        val url = param.args[8] as? String ?: return
+                        if (!url.contains("discord")) return
 
-                    val newUrl = rewriteUrl(url)
-                    if (newUrl == url) return
-                    param.args[8] = newUrl
+                        val newUrl = rewriteUrl(url)
+                        if (newUrl == url) return
+                        param.args[8] = newUrl
 
-                    // keep the standalone host field consistent with the new url
-                    val host = param.args[3] as? String
-                    if (host != null) {
-                        val newHost = HOST_MAP[host.lowercase()] ?: rewriteUrl(host)
-                        if (newHost != host) param.args[3] = newHost
+                        // keep the standalone host field consistent with the new url
+                        val host = param.args[3] as? String
+                        if (host != null) {
+                            val newHost = HOST_MAP[host.lowercase()] ?: rewriteUrl(host)
+                            if (newHost != host) param.args[3] = newHost
+                        }
+
+                        Log.i("Redirect: $url -> $newUrl")
+                    } catch (e: Throwable) {
+                        Log.e("HttpUrl redirect hook error; passing through: ${e.message}")
                     }
-
-                    Log.i("Redirect: $url -> $newUrl")
                 }
             })
             Log.i("Hooked okhttp3.HttpUrl.<init> (host+url redirect)")
@@ -120,11 +125,15 @@ object NetworkRedirectModule : Module() {
                     if (urlParamIndex >= 0) {
                         XposedBridge.hookMethod(method, object : XC_MethodHook() {
                             override fun beforeHookedMethod(param: MethodHookParam) {
-                                val url = param.args[urlParamIndex] as? String ?: return
-                                val rewritten = rewriteUrl(url)
-                                if (rewritten != url) {
-                                    param.args[urlParamIndex] = rewritten
-                                    Log.i("RN Redirect: $url -> $rewritten")
+                                try {
+                                    val url = param.args[urlParamIndex] as? String ?: return
+                                    val rewritten = rewriteUrl(url)
+                                    if (rewritten != url) {
+                                        param.args[urlParamIndex] = rewritten
+                                        Log.i("RN Redirect: $url -> $rewritten")
+                                    }
+                                } catch (e: Throwable) {
+                                    Log.e("RN redirect hook error; passing through: ${e.message}")
                                 }
                             }
                         })
