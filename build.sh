@@ -5,10 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELEASE="$ROOT/release"
 mkdir -p "$RELEASE"
 
-cd "$ROOT/kettu-src"
+cd "$ROOT/rain-src"
 bun install
 bun run build
-cp "$ROOT/kettu-src/dist/kettu.js" "$RELEASE/celeste.js"
+cp "$ROOT/rain-src/dist/rain.js" "$RELEASE/celeste.js"
 
 cd "$ROOT/CelesteXposed"
 chmod +x gradlew
