@@ -44,6 +44,14 @@ object NetworkRedirectModule : Module() {
         return CDN_BYPASS_PATHS.any { path.startsWith(it) }
     }
 
+    private fun isHostOnlyCdn(url: String): Boolean {
+        val uri = runCatching { android.net.Uri.parse(url) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase() ?: return false
+        if (host !in CDN_HOSTS) return false
+        val path = uri.path
+        return path.isNullOrEmpty() || path == "/"
+    }
+
     private fun rewriteUrl(url: String): String {
         if (isCdnAssetBypass(url)) return url
         var result = url
@@ -91,6 +99,7 @@ object NetworkRedirectModule : Module() {
                         if (Thread.currentThread().name.contains("OkHttp")) return
                         val url = param.args[8] as? String ?: return
                         if (!url.contains("discord")) return
+                        if (isHostOnlyCdn(url)) return
 
                         val newUrl = rewriteUrl(url)
                         if (newUrl == url) return
