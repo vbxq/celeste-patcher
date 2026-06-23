@@ -23,7 +23,29 @@ object NetworkRedirectModule : Module() {
         "discord.gg" to "alpha.celeste.gg",
     )
 
+    private val CDN_HOSTS = setOf(
+        "cdn.discordapp.com", "cdn.discord.com",
+        "media.discordapp.net", "images.discordapp.net",
+    )
+
+    private val CDN_BYPASS_PATHS = listOf(
+        "/assets/", "/detectables/", "/changelogs/", "/badge-icons/",
+        "/discovery-splashes/", "/hot-spots/", "/embed/",
+        "/avatar-decoration-presets/", "/clyde-ai/", "/quests/",
+        "/build_overrides/", "/streamer-mode-blocked-words/", "/app-assets/",
+        "/app-icons/", "/bad-domains/", "/media/v1/collectibles-shop/",
+    )
+
+    private fun isCdnAssetBypass(url: String): Boolean {
+        val uri = runCatching { android.net.Uri.parse(url) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase() ?: return false
+        if (host !in CDN_HOSTS) return false
+        val path = uri.path ?: return false
+        return CDN_BYPASS_PATHS.any { path.startsWith(it) }
+    }
+
     private fun rewriteUrl(url: String): String {
+        if (isCdnAssetBypass(url)) return url
         var result = url
         for ((from, to) in HOST_MAP) {
             if (result.contains(from)) {
