@@ -52,8 +52,14 @@ object NetworkRedirectModule : Module() {
         return path.isNullOrEmpty() || path == "/"
     }
 
+    private fun isRemoteAuthHandoff(url: String): Boolean {
+        val uri = runCatching { android.net.Uri.parse(url) }.getOrNull() ?: return false
+        return uri.path?.startsWith("/ra/") == true
+    }
+
     private fun rewriteUrl(url: String): String {
         if (isCdnAssetBypass(url)) return url
+        if (isRemoteAuthHandoff(url)) return url
         var result = url
         for ((from, to) in HOST_MAP) {
             if (result.contains(from)) {
