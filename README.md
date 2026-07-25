@@ -1,6 +1,6 @@
 # Celeste Patcher
 
-Patches the Discord Android app to connect to a [Celeste](https://celeste.gg) instead of Discord servers
+Patches the Discord Android app to connect to [Celeste](https://celeste.gg) instead of Discord servers
 
 ## How it works
 
@@ -16,6 +16,7 @@ At runtime, CelesteXposed hooks `okhttp3.HttpUrl`
 | `media.discordapp.net` | `media.celeste.gg` |
 | `latency.discord.gg` | `latency.celeste.gg` |
 
+The key file is [`NetworkRedirectModule.kt`](CelesteXposed/app/src/main/kotlin/gg/celeste/xposed/modules/NetworkRedirectModule.kt). It contains the `HttpUrl` constructor hook and the host mapping table.
 
 ## Install (prebuilt)
 
@@ -83,15 +84,6 @@ echo "sdk.dir=$HOME/Android/Sdk" > local.properties
 
 The signed APK is at `app/build/outputs/apk/release/app-release.apk`. Install it on your phone.
 
-## Project structure
-
-```
-CelesteManager/     Android app — downloads Discord, injects CelesteXposed via LSPatch, installs
-CelesteXposed/      Xposed module — hooks OkHttp to redirect all Discord traffic to Celeste
-```
-
-The key file is [`NetworkRedirectModule.kt`](CelesteXposed/app/src/main/kotlin/gg/celeste/xposed/modules/NetworkRedirectModule.kt). It contains the `HttpUrl` constructor hook and the host mapping table.
-
 ## Changing the target instance
 
 Edit the `HOST_MAP` in `NetworkRedirectModule.kt`:
@@ -109,7 +101,6 @@ Rebuild CelesteXposed and redeploy.
 
 ## When Discord updates
 
-
 this should keep working across Discord updates with no changes, to confirm a build still redirects, watch logcat:
 
 ```bash
@@ -117,11 +108,6 @@ adb logcat -s Celeste
 ```
 
 or just try logging in to your celeste account
-
-
-## TODOs ? 
-
-patch the hermes bytecode to rewrite `discord.gg` -> `celeste.gg` in bundled invite links, actual Discord => Celeste
 
 ## Credits
 
