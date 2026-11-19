@@ -109,8 +109,13 @@ Rebuild CelesteXposed and redeploy.
 
 ## When Discord updates
 
+Discord 352+ ships R8-obfuscated (no `okhttp3.HttpUrl`, no `ReactActivity`, no named bundle loader class). CelesteXposed finds the launcher activity, the bundle loader and the HttpUrl constructor by shape instead of by name, and each module fails on its own without taking the others down.
 
-this should keep working across Discord updates with no changes, to confirm a build still redirects, watch logcat:
+CelesteManager only offers the newest Discord stable it was validated against (`DiscordVersion.Type.STABLE.maxValidatedVersionCode`, currently 354.12). After checking a newer build on a device, bump that value and `supportedVersionsAndroid` in `rain-src/scripts/build.mjs`.
+
+To test against a local stack, root a test device and drop `files/pyoncord/celeste_target_override.json` in the app data dir, e.g. `{"alpha.celeste.gg": "http://10.0.2.2:5002", "alpha-gateway.celeste.gg": "http://10.0.2.2:5001"}`. Without that file nothing changes.
+
+To confirm a build still redirects, watch logcat:
 
 ```bash
 adb logcat -s Celeste
