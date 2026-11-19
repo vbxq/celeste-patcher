@@ -7,9 +7,11 @@ import { injectFluxInterceptor } from "./api/flux";
 import { patchJsx } from "./api/react/jsx";
 import * as lib from "./lib";
 import patchCelesteInvites from "./celesteInvites";
+import patchDaveDowngrade from "./celesteDave";
 
 export default async () => {
     const critical = await Promise.all([
+        patchDaveDowngrade(),
         patchLogHook(),
         patchJsx(),
         injectFluxInterceptor(),
