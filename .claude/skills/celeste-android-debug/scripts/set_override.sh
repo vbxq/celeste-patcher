@@ -1,5 +1,6 @@
 #!/bin/bash
-# usage: set_override.sh [api_base] [gateway_base]   (default: local stack on the host via 10.0.2.2)
+# usage: set_override.sh [api_base] [gateway_base] [host=base ...]   (default: local stack on the host via 10.0.2.2)
+#        e.g. local voice: set_override.sh "" "" localhost:5005=http://10.0.2.2:5005
 #        set_override.sh --clear
 set -euo pipefail
 . "$(dirname "$0")/env.sh"
@@ -9,7 +10,9 @@ if [ "${1:-}" = "--clear" ]; then
 fi
 api="${1:-http://10.0.2.2:5002}"
 gw="${2:-http://10.0.2.2:5001}"
-printf '{"alpha.celeste.gg":"%s","alpha-gateway.celeste.gg":"%s"}\n' "$api" "$gw" > "$SCRATCH/override.json"
+json="{\"alpha.celeste.gg\":\"$api\",\"alpha-gateway.celeste.gg\":\"$gw\""
+for pair in "${@:3}"; do json="$json,\"${pair%%=*}\":\"${pair#*=}\""; done
+echo "$json}" > "$SCRATCH/override.json"
 adb push "$SCRATCH/override.json" /data/local/tmp/o.json > /dev/null
 adb shell "d=\$(dirname $f); [ -d \$d ] || { echo 'launch the app once first'; exit 1; }; \
   cp /data/local/tmp/o.json $f && chown \$(stat -c %U:%G \$d) $f && chmod 600 $f && restorecon $f; cat $f"

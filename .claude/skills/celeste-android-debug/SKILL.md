@@ -33,9 +33,12 @@ Through the manager (faithful to what users do):
 adb install -r release/CelesteManager.apk     # or the published one from the GitHub release
 adb shell appops set gg.celeste.manager MANAGE_EXTERNAL_STORAGE allow
 adb shell appops set gg.celeste.manager REQUEST_INSTALL_PACKAGES allow
+adb shell pm grant gg.celeste.manager android.permission.POST_NOTIFICATIONS
 adb shell monkey -p gg.celeste.manager -c android.intent.category.LAUNCHER 1
 # tap Install (540 810) or Reinstall (540 864); the system "install this app?" prompt then needs Install (894 1380)
 ```
+- Wait ~4 s after the prompt window gets focus (`adb shell dumpsys window | grep mCurrentFocus` shows `packageinstaller`) before tapping Install: an early tap cancels it and the manager still reports success. Always confirm with `adb shell pm list packages | grep gg.celeste.app`.
+- After the app is installed: `adb shell pm grant gg.celeste.app android.permission.POST_NOTIFICATIONS` (and `RECORD_AUDIO` for voice) to skip the permission dialogs.
 - Testing an unpublished module: the manager reuses `/sdcard/Android/data/gg.celeste.manager/cache/xposed.apk` if present. Push it AFTER the manager home screen loaded (its init deletes a stale cache when the latest `vbxq/celeste-patcher` tag changed), then tap (Re)install:
   `adb push CelesteXposed/app/build/outputs/apk/release/app-release.apk /sdcard/Android/data/gg.celeste.manager/cache/xposed.apk`
 - Discord splits are cached under `.../cache/<versionCode>/`, so a reinstall takes ~1-2 min, a first install ~5 min.
@@ -77,6 +80,12 @@ $S/launch.sh local 30                    # expect "W Celeste : Target override a
 ```
 Login: tap Log In (540 2229), email field (540 639), `adb shell input text "<email>"`, password field (540 906), `adb shell input text password123`, `adb shell input keyevent 111`, Log In button (540 1209). Then dismiss the notification prompt (540 1461), open the guild (93 393), the channel (400 597; the first tap may only dismiss a tutorial sheet), message box (400 2259), `adb shell input text "hello%sfrom%sandroid"`, send (960 1413).
 Prove both directions: `python3 -I $S/local_api.py messages` shows the app's message; `python3 -I $S/local_api.py send <channel_id> realtime test` must appear in the app within seconds (gateway uses `compress=zstd-stream`).
+Voice on the local stack: the voice endpoint in VOICE_SERVER_UPDATE is `localhost:5005` (nginx with a self-signed cert, which Android rejects), so map it straight to the plain voice node ports bound on host loopback:
+```bash
+$S/set_override.sh "" "" localhost:5005=http://10.0.2.2:15005 localhost:5015=http://10.0.2.2:15015
+```
+Then guild (93 393), voice channel row (375 693), Join Voice (540 2232). Expect `Redirect: https://localhost:5005/?v=9 -> http://10.0.2.2:15005/?v=9`, native `voice_connection.cpp ... Create connection to <LAN ip>:19329`, then `connection.cpp ... Resetting MLS session since DAVE protocol is off`; the voice node logs `voice connection established over legacy plain-UDP`. Media goes to the LAN IP the node advertises (`media_advertise_ip` in `runtime/voice.log`), reachable from the emulator NAT. A disconnect ~0.6 s after `AudioSendStream` starts (`udp_socket.cpp ... Disconnect`, `Prepare disconnect with 1`) is the client refusing DAVE version 0: Celeste nodes run without DAVE and Discord's `_ensureDaveProtocolVersionAllowed(stage, version, transitionId)` refuses version 0 (web: close 4804 "Refusing DAVE protocol downgrade"). `rain-src/src/celesteDave.ts` makes it accept 0; it must stay in the bundle until Celeste voice speaks DAVE. Release JS logs do not reach logcat, so judge from the native lines and the voice node log.
+
 Never use real accounts; production is only exercised up to the login screen (no override file). `set_override.sh --clear` reverts. A fresh install wipes app data, including the override.
 
 ## 5. Building
@@ -92,7 +101,7 @@ Fresh worktrees need `local.properties` (`sdk.dir=$HOME/Android/Sdk`) and `celes
 Release artifacts (`./build.sh` collects them into the gitignored `release/`): `rain-src/dist/rain.js` as `celeste.js`, `CelesteXposed/app/build/outputs/apk/release/app-release.apk` as `CelesteXposed.apk`, `CelesteManager/app/build/outputs/apk/release/app-release.apk` as `CelesteManager.apk`.
 Publish: a new GitHub release on `vbxq/celeste-patcher` with exactly those 3 files (the module downloads `releases/latest/download/<name>`). Existing installs pick up `celeste.js` automatically; the old manager keeps its cached `xposed.apk`, so users must press "Clear cache" in the manager (or install the new manager) and Reinstall.
 
-Updating rain: `git clone https://codeberg.org/raincord/rain`; the vendored base is recorded in the sync commit message (`git log --grep 'sync rain-src'`). Replace the tracked files of `rain-src/` with `git archive <upstream-commit>`, then re-apply the Celeste deltas (`src/celesteInvites.ts`, its call in `src/index.ts`, the host rewrite block in `src/metro/internals/modules.ts`, the `painter/themes/patches/background.tsx` fix until upstream has it) and verify with `diff -r` against the upstream archive that nothing else differs.
+Updating rain: `git clone https://codeberg.org/raincord/rain`; the vendored base is recorded in the sync commit message (`git log --grep 'sync rain-src'`). Replace the tracked files of `rain-src/` with `git archive <upstream-commit>`, then re-apply the Celeste deltas (`src/celesteInvites.ts` and `src/celesteDave.ts`, their calls in `src/index.ts`, the host rewrite block in `src/metro/internals/modules.ts`, the `painter/themes/patches/background.tsx` fix until upstream has it) and verify with `diff -r` against the upstream archive that nothing else differs.
 
 ## 6. Known gaps on 354.12 and the next-Discord checklist
 
@@ -100,7 +109,7 @@ Not working, logged and isolated: custom fonts (`ReactFontManager$Companion` gon
 
 New Discord stable:
 1. `$S/inspect_discord.sh <code>`: any new MISS among the hook classes, a different accessor shape, or no 9-arg HttpUrl ctor means CelesteXposed work.
-2. Install through the manager with the cap temporarily raised (or set the version in the manager's developer settings), launch twice, run the section 4 loop: login, open a channel, send, receive.
+2. Install through the manager with the cap temporarily raised (or set the version in the manager's developer settings), launch twice, run the section 4 loop: login, open a channel, send, receive, join voice and stay connected.
 3. Watch for rain lazy-patch crashes when opening screens (the "UH OH" screen).
 4. Bump `maxValidatedVersionCode` + `supportedVersionsAndroid`, rebuild, publish.
 
