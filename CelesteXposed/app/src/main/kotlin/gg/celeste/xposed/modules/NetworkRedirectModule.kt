@@ -119,7 +119,7 @@ object NetworkRedirectModule : Module() {
                     try {
                         if (Thread.currentThread().name.contains("OkHttp")) return
                         val url = param.args[8] as? String ?: return
-                        if (!url.contains("discord")) return
+                        if (!url.contains("discord") && targetOverride.isEmpty()) return
                         if (isHostOnlyCdn(url)) return
 
                         val newUrl = rewriteUrl(url)
