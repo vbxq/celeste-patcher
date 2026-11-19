@@ -125,7 +125,7 @@ class HomeViewModel(
             release?.let {
                 showUpdateDialog = it.tagName.toInt() > BuildConfig.VERSION_CODE
             }
-            repo.getLatestRelease("celeste-gg/CelesteXposed").ifSuccessful {
+            repo.getLatestRelease("vbxq/celeste-patcher").ifSuccessful {
                 if (prefs.moduleVersion != it.tagName) {
                     prefs.moduleVersion = it.tagName
                     val module = File(cacheDir, "xposed.apk")

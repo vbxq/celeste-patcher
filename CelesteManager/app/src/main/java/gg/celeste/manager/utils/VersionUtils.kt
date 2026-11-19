@@ -10,10 +10,16 @@ data class DiscordVersion(
     val type: Type
 ) : Serializable, Comparable<DiscordVersion> {
 
-    enum class Type(val label: String, @StringRes val labelRes: Int) {
-        STABLE("Stable", R.string.channel_stable),
-        BETA("Beta", R.string.channel_beta),
-        ALPHA("Alpha", R.string.channel_alpha)
+    // newest build each channel was verified against; a newer upstream build is offered only once the hooks are revalidated
+    enum class Type(val label: String, @StringRes val labelRes: Int, val maxValidatedVersionCode: Int?) {
+        STABLE("Stable", R.string.channel_stable, 354012),
+        BETA("Beta", R.string.channel_beta, null),
+        ALPHA("Alpha", R.string.channel_alpha, null)
+    }
+
+    fun coerceAtMostValidated(): DiscordVersion {
+        val max = type.maxValidatedVersionCode ?: return this
+        return if (toVersionCode().toInt() > max) fromVersionCode(max.toString()) ?: this else this
     }
 
     override fun compareTo(other: DiscordVersion): Int =

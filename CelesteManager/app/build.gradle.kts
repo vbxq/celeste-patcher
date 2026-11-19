@@ -16,8 +16,8 @@ android {
         applicationId = "gg.celeste.manager"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1220
-        versionName = "1.2.2"
+        versionCode = 1300
+        versionName = "1.3.0"
 
         buildConfigField("String", "GIT_BRANCH", "\"${getCurrentBranch()}\"")
         buildConfigField("String", "GIT_COMMIT", "\"${getLatestCommit()}\"")

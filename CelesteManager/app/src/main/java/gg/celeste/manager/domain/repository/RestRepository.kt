@@ -15,7 +15,7 @@ class RestRepository(
             DiscordVersion.Type.ALPHA to DiscordVersion.fromVersionCode(it.latest.alpha),
             DiscordVersion.Type.BETA to DiscordVersion.fromVersionCode(it.latest.beta),
             DiscordVersion.Type.STABLE to DiscordVersion.fromVersionCode(it.latest.stable)
-        )
+        ).mapValues { (_, version) -> version?.coerceAtMostValidated() }
     }
 
     suspend fun getCommits(repo: String, page: Int = 1) = service.getCommits(repo, page)
