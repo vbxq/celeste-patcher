@@ -63,19 +63,51 @@ class Main : Module(), IXposedHookLoadPackage, IXposedHookZygoteInit {
     override fun handleLoadPackage(param: XC_LoadPackage.LoadPackageParam) = with(param) {
         if (hooked) return
 
-        val reactActivity = classLoader.loadClass(Constants.TARGET_ACTIVITY)
+        val activityHooked = java.util.concurrent.atomic.AtomicBoolean(false)
 
         ContextWrapper::class.java.hookMethod("attachBaseContext", Context::class.java) {
             after {
                 val ctx = args[0] as Context
+                if (activityHooked.compareAndSet(false, true)) hookLauncherActivity(classLoader, ctx)
                 HookStateHolder.gotContext = true
                 Log.i("Received Context")
                 this@Main.onContext(ctx)
             }
         }
 
-        reactActivity.hookMethod("onCreate", Bundle::class.java) {
+        this@Main.onLoad(param)
+
+        hooked = true
+    }
+
+    // discord 352+ is r8 obfuscated and ReactActivity is gone, so resolve the launcher activity at runtime
+    private fun hookLauncherActivity(classLoader: ClassLoader, ctx: Context) {
+        val name = try {
+            launcherActivityName(ctx)
+        } catch (e: Throwable) {
+            Log.w("Unable to resolve the launcher activity, falling back to ${Constants.TARGET_ACTIVITY}", e)
+            Constants.TARGET_ACTIVITY
+        }
+
+        val onCreate = try {
+            var cls: Class<*>? = classLoader.loadClass(name)
+            var found: java.lang.reflect.Method? = null
+            while (cls != null && found == null) {
+                found = cls.declaredMethods.firstOrNull {
+                    it.name == "onCreate" && it.parameterTypes.contentEquals(arrayOf(Bundle::class.java))
+                }
+                cls = cls.superclass
+            }
+            found ?: throw NoSuchMethodException("onCreate(Bundle) not found for $name")
+        } catch (e: Throwable) {
+            Log.e("Unable to hook launcher activity $name", e)
+            return
+        }
+
+        Log.i("Hooking launcher activity $name (onCreate in ${onCreate.declaringClass.name})")
+        onCreate.hook {
             after {
+                if (thisObject?.javaClass?.name != name) return@after
                 val act = thisObject as Activity
                 Log.i("Received Activity")
 
@@ -88,21 +120,29 @@ class Main : Module(), IXposedHookLoadPackage, IXposedHookZygoteInit {
                 HookStateHolder.readyDeferred.complete(Unit)
             }
         }
-
-        this@Main.onLoad(param)
-
-        hooked = true
     }
 
-    override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) {
-        for (module in modules) module.onLoad(packageParam)
+    private fun launcherActivityName(ctx: Context): String {
+        val pm = ctx.packageManager
+        val intent = pm.getLaunchIntentForPackage(ctx.packageName) ?: error("No launch intent for ${ctx.packageName}")
+        val info = pm.resolveActivity(intent, 0)?.activityInfo ?: error("Launch intent for ${ctx.packageName} doesn't resolve")
+        return info.targetActivity ?: info.name
     }
 
-    override fun onContext(context: Context) {
-        for (module in modules) module.onContext(context)
+    // one module failing on a new discord build must not take the others down with it
+    private inline fun forEachModule(stage: String, block: (Module) -> Unit) {
+        for (module in modules) {
+            try {
+                block(module)
+            } catch (e: Throwable) {
+                Log.e("${module.javaClass.simpleName}.$stage failed", e)
+            }
+        }
     }
 
-    override fun onActivity(activity: Activity) {
-        for (module in modules) module.onActivity(activity)
-    }
+    override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) = forEachModule("onLoad") { it.onLoad(packageParam) }
+
+    override fun onContext(context: Context) = forEachModule("onContext") { it.onContext(context) }
+
+    override fun onActivity(activity: Activity) = forEachModule("onActivity") { it.onActivity(activity) }
 }

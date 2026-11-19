@@ -51,6 +51,17 @@ object HookScriptLoaderModule : Module() {
         }
     }
 
+    // set by PayloadGlobalModule, evaluated before every other injected script
+    @Volatile
+    var globalsScript: (() -> String)? = null
+
+    private class LoaderTarget(
+        val loadFromAssets: Method,
+        val loadFromFile: Method,
+        val runFile: (thisObject: Any?, args: Array<Any?>, path: String) -> Unit,
+        val runAsset: (thisObject: Any?, args: Array<Any?>, assets: AssetManager, url: String) -> Unit,
+    )
+
     override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) = with(packageParam) {
         val cacheDir = File(appInfo.dataDir, Constants.CACHE_DIR).apply { asDir() }
         val filesDir = File(appInfo.dataDir, Constants.FILES_DIR).apply { asDir() }
@@ -58,41 +69,77 @@ object HookScriptLoaderModule : Module() {
         preloadsDir = File(filesDir, PRELOADS_DIR).apply { asDir() }
         mainScript = File(cacheDir, Constants.MAIN_SCRIPT_FILE).apply { asFile() }
 
-        listOf(
+        val targets = listOf(
             "com.facebook.react.runtime.ReactInstance\$loadJSBundle$1",
             "com.facebook.react.runtime.ReactInstance$1",
-            // TODO: Remove once Discord fully switches to Bridgeless
             "com.facebook.react.bridge.CatalystInstanceImpl"
-        ).mapNotNull { classLoader.safeLoadClass(it) }.forEach { hook(it) }
+        ).mapNotNull { classLoader.safeLoadClass(it) }.mapNotNull { delegateTarget(it) }
+            .ifEmpty { listOfNotNull(reactInstanceTarget(classLoader)) }
+
+        if (targets.isEmpty()) Log.e("No React Native script loader found, bundle will not be injected")
+        targets.forEach { hook(it) }
     }
 
-    private fun hook(instance: Class<*>) = runCatching {
-        val loadScriptFromAssets = instance.method(
+    private fun delegateTarget(instance: Class<*>): LoaderTarget? = runCatching {
+        val fromAssets = instance.method(
             "loadScriptFromAssets", AssetManager::class.java, String::class.java, Boolean::class.javaPrimitiveType
         )
-
-        val loadScriptFromFile = instance.method(
+        val fromFile = instance.method(
             "loadScriptFromFile", String::class.java, String::class.java, Boolean::class.javaPrimitiveType
         )
-
-        loadScriptFromAssets.hook {
-            before {
-                Log.i("Received call to loadScriptFromAssets: ${args[1]} (sync: ${args[2]})")
-                runCustomScripts(loadScriptFromFile, loadScriptFromAssets)
-            }
-        }
-
-        loadScriptFromFile.hook {
-            before {
-                Log.i("Received call to loadScriptFromFile: ${args[0]} (sync: ${args[2]})")
-                runCustomScripts(loadScriptFromFile, loadScriptFromAssets)
-            }
-        }
+        LoaderTarget(
+            fromAssets, fromFile,
+            runFile = { self, args, path ->
+                XposedBridge.invokeOriginalMethod(fromFile, self, arrayOf(path, path, args[2]))
+            },
+            runAsset = { self, args, assets, url ->
+                XposedBridge.invokeOriginalMethod(fromAssets, self, arrayOf(assets, url, args[2]))
+            },
+        )
     }.onFailure {
-        Log.e("Failed to hook script loading methods in ${instance.name}:", it)
+        Log.e("Failed to resolve script loading methods in ${instance.name}:", it)
+    }.getOrNull()
+
+    // discord 352+ is r8 obfuscated: the JSBundleLoaderDelegate is an anonymous class with a random name,
+    // but it reaches ReactInstance's private natives through static accessors whose signatures are stable
+    private fun reactInstanceTarget(classLoader: ClassLoader): LoaderTarget? = runCatching {
+        val reactInstance = classLoader.loadClass("com.facebook.react.runtime.ReactInstance")
+        val statics = reactInstance.declaredMethods.filter { java.lang.reflect.Modifier.isStatic(it.modifiers) }
+        val fromAssets = statics.single {
+            it.parameterTypes.contentEquals(arrayOf(reactInstance, AssetManager::class.java, String::class.java))
+        }.apply { isAccessible = true }
+        val fromFile = statics.single {
+            it.parameterTypes.contentEquals(arrayOf(reactInstance, String::class.java, String::class.java))
+        }.apply { isAccessible = true }
+        Log.i("Using ReactInstance accessors ${fromAssets.name}/${fromFile.name} as script loader")
+        LoaderTarget(
+            fromAssets, fromFile,
+            runFile = { _, args, path -> XposedBridge.invokeOriginalMethod(fromFile, null, arrayOf(args[0], path, path)) },
+            runAsset = { _, args, assets, url ->
+                XposedBridge.invokeOriginalMethod(fromAssets, null, arrayOf(args[0], assets, url))
+            },
+        )
+    }.onFailure {
+        Log.e("Failed to resolve ReactInstance script loader accessors:", it)
+    }.getOrNull()
+
+    private fun hook(target: LoaderTarget) {
+        target.loadFromAssets.hook {
+            before {
+                Log.i("Received call to ${target.loadFromAssets.name}: ${args.drop(1).joinToString()}")
+                runCustomScripts(target)
+            }
+        }
+
+        target.loadFromFile.hook {
+            before {
+                Log.i("Received call to ${target.loadFromFile.name}: ${args.joinToString()}")
+                runCustomScripts(target)
+            }
+        }
     }
 
-    private fun HookScope.runCustomScripts(loadScriptFromFile: Method, loadScriptFromAssets: Method) {
+    private fun HookScope.runCustomScripts(target: LoaderTarget) {
         Log.i("Running custom scripts...")
 
         runBlocking {
@@ -112,26 +159,26 @@ object HookScriptLoaderModule : Module() {
             }
         }
 
-        val loadSynchronously = args[2]
         val runScriptFile = { file: File ->
             Log.i("Loading script: ${file.absolutePath}")
-
-            XposedBridge.invokeOriginalMethod(
-                loadScriptFromFile, thisObject, arrayOf(file.absolutePath, file.absolutePath, loadSynchronously)
-            )
-
-            Unit
+            target.runFile(thisObject, args, file.absolutePath)
         }
 
         try {
+            globalsScript?.let { script ->
+                val file = File(preloadsDir.parentFile, "rv_globals.js")
+                file.writeText(script())
+                try {
+                    runScriptFile(file)
+                } finally {
+                    file.delete()
+                }
+            }
+
             preloadsDir.walk().filter { it.isFile }.forEach(runScriptFile)
 
-            // Check whether bundle injection execution is disabled via loader config.
-            // UpdaterModule.isInjectionDisabled reads the in-memory config (loaded in its onLoad),
-            // and falls back to disk if necessary. We call it without a Context because by the time
-            // this runs the UpdaterModule config should already be available.
             val injectionDisabled = try {
-                gg.celeste.xposed.modules.UpdaterModule.isInjectionDisabled()
+                UpdaterModule.isInjectionDisabled()
             } catch (e: Throwable) {
                 Log.e("Failed to check injection disabled flag: ${e.message}")
                 false
@@ -146,11 +193,7 @@ object HookScriptLoaderModule : Module() {
 
                     if (!::resources.isInitialized) resources = XModuleResources.createInstance(modulePath, null)
 
-                    XposedBridge.invokeOriginalMethod(
-                        loadScriptFromAssets,
-                        thisObject,
-                        arrayOf(resources.assets, "assets://revenge.bundle", loadSynchronously)
-                    )
+                    target.runAsset(thisObject, args, resources.assets, "assets://revenge.bundle")
                 }
             }
         } catch (e: Throwable) {

@@ -66,7 +66,25 @@ object NetworkRedirectModule : Module() {
                 result = result.replace(from, to)
             }
         }
+        for ((host, base) in targetOverride) {
+            result = result.replace("https://$host", base).replace("http://$host", base)
+        }
         return result
+    }
+
+    // debug only, never shipped: lets a test device point the app at a local stack, e.g. {"alpha.celeste.gg": "http://10.0.2.2:5002"}
+    private var targetOverride: Map<String, String> = emptyMap()
+
+    private fun loadTargetOverride(dataDir: String) {
+        val file = java.io.File(dataDir, "${gg.celeste.xposed.Constants.FILES_DIR}/celeste_target_override.json")
+        if (!file.exists()) return
+        try {
+            val json = org.json.JSONObject(file.readText())
+            targetOverride = json.keys().asSequence().associateWith { json.getString(it).trimEnd('/') }
+            Log.w("Target override active: $targetOverride")
+        } catch (e: Throwable) {
+            Log.e("Ignoring unreadable target override: ${e.message}")
+        }
     }
 
     override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) { with(packageParam) {
@@ -78,8 +96,9 @@ object NetworkRedirectModule : Module() {
         // HttpUrl.Builder              : okhttp3.HttpUrl$a -> hs.s, host() `l` -> `e`
         // class name `okhttp3.HttpUrl` and this constructor's shape are kept stable across versions (bc public OkHttp API surface)
         // so this survives R8 renames
+        loadTargetOverride(appInfo.dataDir)
         hookHttpUrlConstructor(classLoader)
-        
+
         hookNetworkingModule(classLoader)
         hookClipboard()
         hookShareIntent()
@@ -87,17 +106,13 @@ object NetworkRedirectModule : Module() {
 
     private fun hookHttpUrlConstructor(classLoader: ClassLoader) {
         try {
-            val httpUrlClass = classLoader.loadClass("okhttp3.HttpUrl")
             // okhttp3.HttpUrl has exactly one constructor (9 args)
             // locate it by arity + the int port at index 4 instead of an exact parameter type list
             // this way we don't depend on List-vs-ArrayList descriptor details that differ between decompilers/R8 builds
-            val ctor = httpUrlClass.declaredConstructors.firstOrNull { c ->
-                val p = c.parameterTypes
-                p.size == 9 &&
-                    p[3] == String::class.java &&
-                    p[4] == Integer.TYPE &&
-                    p[8] == String::class.java
-            } ?: throw NoSuchMethodException("okhttp3.HttpUrl 9-arg constructor not found")
+            val ctor = runCatching { classLoader.loadClass("okhttp3.HttpUrl") }.getOrNull()?.let(::httpUrlConstructor)
+                ?: findObfuscatedHttpUrlConstructor(classLoader)
+                ?: throw NoSuchMethodException("okhttp3.HttpUrl 9-arg constructor not found")
+            Log.i("HttpUrl constructor: $ctor")
 
             XposedBridge.hookMethod(ctor, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
@@ -111,11 +126,14 @@ object NetworkRedirectModule : Module() {
                         if (newUrl == url) return
                         param.args[8] = newUrl
 
-                        // keep the standalone host field consistent with the new url
-                        val host = param.args[3] as? String
-                        if (host != null) {
-                            val newHost = HOST_MAP[host.lowercase()] ?: rewriteUrl(host)
-                            if (newHost != host) param.args[3] = newHost
+                        // keep the standalone scheme/host/port fields consistent with the new url
+                        val parsed = android.net.Uri.parse(newUrl)
+                        val newScheme = parsed.scheme
+                        val newHost = parsed.host
+                        if (newScheme != null && newHost != null) {
+                            param.args[0] = newScheme
+                            param.args[3] = newHost
+                            param.args[4] = if (parsed.port != -1) parsed.port else if (newScheme == "http") 80 else 443
                         }
 
                         Log.i("Redirect: $url -> $newUrl")
@@ -128,6 +146,46 @@ object NetworkRedirectModule : Module() {
         } catch (e: Throwable) {
             Log.e("Failed to hook okhttp3.HttpUrl.<init>: ${e.message}")
         }
+    }
+
+    private fun httpUrlConstructor(cls: Class<*>): java.lang.reflect.Constructor<*>? =
+        cls.declaredConstructors.firstOrNull { c ->
+            val p = c.parameterTypes
+            p.size == 9 &&
+                p[0] == String::class.java &&
+                p[3] == String::class.java &&
+                p[4] == Integer.TYPE &&
+                p[8] == String::class.java
+        }
+
+    // discord 352+ renames okhttp3.HttpUrl, so walk the okhttp types reachable from NetworkingModule's client
+    private fun findObfuscatedHttpUrlConstructor(classLoader: ClassLoader): java.lang.reflect.Constructor<*>? {
+        val root = classLoader.loadClass("com.facebook.react.modules.network.NetworkingModule")
+        val seen = HashSet<Class<*>>()
+        var frontier = listOf(root)
+        repeat(5) {
+            val next = ArrayList<Class<*>>()
+            for (cls in frontier) {
+                if (!seen.add(cls)) continue
+                if (cls != root) httpUrlConstructor(cls)?.let { return it }
+                val referenced = runCatching {
+                    cls.declaredFields.map { it.type } +
+                        cls.declaredMethods.flatMap { it.parameterTypes.toList() + it.returnType } +
+                        cls.declaredConstructors.flatMap { it.parameterTypes.toList() }
+                }.getOrDefault(emptyList())
+                referenced.filterTo(next) { isCandidateType(it) && it !in seen }
+            }
+            if (seen.size > 2000) return null
+            frontier = next.distinct()
+        }
+        return null
+    }
+
+    private fun isCandidateType(cls: Class<*>): Boolean {
+        if (cls.isPrimitive || cls.isArray || cls.isInterface) return false
+        val name = cls.name
+        return !name.startsWith("java.") && !name.startsWith("javax.") && !name.startsWith("android.") &&
+            !name.startsWith("kotlin.") && !name.startsWith("com.facebook.")
     }
 
     private fun hookNetworkingModule(classLoader: ClassLoader) {
