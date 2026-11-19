@@ -28,10 +28,18 @@ export const Developers = {
     SerStars: {
         name: "SerStars",
         id: 861631850681729045n,
+    },
+    Livie: {
+        name: "Livie",
+        id: 755950362342457384n,
     }
 } satisfies Record<string, developer>;
 
 export const Contributors = {
+    Rosie: {
+        name: "Rosie",
+        id: 1356936317501571214n,
+    },
     rico040: {
         name: "rico040",
         id: 619474349845643275n,
@@ -159,5 +167,17 @@ export const Contributors = {
     tralwdwd: {
         name: "tralwdwdd",
         id: 1278723517436788897n
+    },
+    thororen: {
+        name: "thororen",
+        id: 848339671629299742n
+    },
+    benjii: {
+        name: "Benjii",
+        id: 463702169443368970n,
+    },
+    baxter: {
+        name: "baxter.zip",
+        id: 554042298053427211n,
     }
 } satisfies Record<string, developer>;

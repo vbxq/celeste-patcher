@@ -4,15 +4,10 @@ import { ReactNative as RN } from "@metro/common";
 import { omit } from "es-toolkit";
 import type { ViewProps } from "react-native";
 
-import { find } from "../lib/utils";
 
-const _ActionSheet =
-    findByProps("ActionSheet")?.ActionSheet ??
-    find(x => x.render?.name === "ActionSheet"); // thank you to @pylixonly for fixing this
-
-const { ActionSheetCloseButton, BottomSheetTitleHeader } = findByProps(
-    "ActionSheetCloseButton",
-);
+const _ActionSheet = findByProps("ActionSheet").ActionSheet;
+const { BottomSheetTitleHeader } = findByProps("BottomSheetTitleHeader");
+const { ActionSheetCloseButton } = findByProps("ActionSheetCloseButton");
 
 export const LazyActionSheet = findByProps("openLazy", "hideActionSheet") as {
     openLazy: (component: Promise<any>, key: string, props?: object) => void;
@@ -29,20 +24,23 @@ type ActionSheetProps = React.PropsWithChildren<
 
 export const ActionSheet = ((props: ActionSheetProps) => {
     return (
-        <_ActionSheet>
-            <BottomSheetTitleHeader
-                title={props.title}
-                trailing={
-                    <ActionSheetCloseButton
-                        onPress={
-                            props.onClose ??
-                            (() => {
-                                hideActionSheet();
-                            })
-                        }
-                    />
-                }
-            />
+        <_ActionSheet
+            header={
+                <BottomSheetTitleHeader
+                    title={props.title}
+                    trailing={
+                        <ActionSheetCloseButton
+                            onPress={
+                                props.onClose ??
+                                (() => {
+                                    hideActionSheet();
+                                })
+                            }
+                        />
+                    }
+                />
+            }
+        >
             <RN.View {...omit(props, ["title", "onClose"])} />
         </_ActionSheet>
     );
